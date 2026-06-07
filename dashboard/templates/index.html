@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Agentic AI Solar Tracker</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Inter', sans-serif;
+      background: #eef2f7;
+      color: #0f172a;
+    }
+
+    header {
+      padding: 16px;
+      font-size: 22px;
+      font-weight: 700;
+      text-align: center;
+      background: white;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    }
+
+    .container {
+      padding: 18px;
+      max-width: 1400px;
+      margin: auto;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+    }
+
+    .card h4 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 600;
+      color: #64748b;
+    }
+
+    .value {
+      font-size: 28px;
+      font-weight: 700;
+      margin-top: 10px;
+    }
+
+    .full { grid-column: span 4; }
+    .wide { grid-column: span 2; }
+
+    .decision {
+      background: linear-gradient(135deg, #2563eb, #1e40af);
+      color: white;
+    }
+
+    .decision h4 { color: #dbeafe; }
+
+    .chart-container { height: 320px; }
+
+    .tabs button {
+      border: none;
+      background: #e2e8f0;
+      padding: 6px 14px;
+      margin-right: 8px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .events {
+      font-size: 13px;
+      margin-top: 12px;
+      max-height: 240px;
+      overflow-y: auto;
+      line-height: 1.6;
+    }
+
+    .event-critical { color: #dc2626; }
+    .event-warning  { color: #ca8a04; }
+    .event-recovery { color: #16a34a; }
+    .event-info     { color: #475569; }
+  </style>
+</head>
+
+<body>
+
+<header>🌞 Agentic AI Solar Tracker</header>
+
+<div class="container">
+
+  <!-- METRICS -->
+  <div class="grid">
+    <div class="card"><h4>Power</h4><div class="value" id="power">-- W</div></div>
+    <div class="card"><h4>Voltage</h4><div class="value" id="voltage">-- V</div></div>
+    <div class="card"><h4>Current</h4><div class="value" id="current">-- A</div></div>
+    <div class="card"><h4>Weather</h4><div class="value" id="weather">--</div></div>
+
+    <div class="card"><h4>Clouds</h4><div class="value" id="clouds">--%</div></div>
+    <div class="card"><h4>Day / Night</h4><div class="value" id="daynight">--</div></div>
+    <div class="card"><h4>Status</h4><div class="value" id="status">--</div></div>
+    <div class="card"><h4>LDR Δ</h4><div class="value" id="ldr">--</div></div>
+  </div>
+
+  <br>
+
+  <!-- AI DECISION -->
+  <div class="card decision full">
+    <h4>AI Decision</h4>
+    <div class="value" id="decision">--</div>
+    <p id="reason" style="margin-top:10px; opacity:0.9;"></p>
+  </div>
+
+  <br>
+
+  <!-- ANALYTICS -->
+  <div class="grid">
+
+    <div class="card wide">
+      <h4>Production Analytics</h4>
+      <div class="tabs">
+        <button onclick="switchChart('day')">Today</button>
+        <button onclick="switchChart('week')">Week</button>
+        <button onclick="switchChart('month')">Month</button>
+        <button onclick="switchChart('year')">Year</button>
+      </div>
+      <div class="chart-container">
+        <canvas id="chart"></canvas>
+      </div>
+    </div>
+
+    <div class="card wide">
+      <h4>Energy Summary</h4>
+      <div style="font-size:17px; margin-top:14px; line-height:2;">
+        🔋 Today: <b><span id="e_today">0</span> kWh</b><br>
+        📅 Week: <b><span id="e_week">0</span> kWh</b><br>
+        🗓 Month: <b><span id="e_month">0</span> kWh</b><br>
+        ♾ Lifetime: <b><span id="e_life">0</span> kWh</b>
+      </div>
+    </div>
+
+  </div>
+
+  <br>
+
+  <!-- SYSTEM EVENTS -->
+  <div class="card full">
+    <h4>System Events</h4>
+    <div id="events" class="events">Loading events…</div>
+  </div>
+
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+
+  const $ = id => document.getElementById(id);
+  const safe = v => (typeof v === "number" && !isNaN(v)) ? v : 0;
+
+  const todayKey = new Date().toISOString().slice(0, 10);
+
+  let storedDay = localStorage.getItem("power_day");
+  let storedSeries = JSON.parse(localStorage.getItem("power_series") || "[]");
+
+  if (storedDay !== todayKey) {
+    storedSeries = [];
+    localStorage.setItem("power_day", todayKey);
+    localStorage.setItem("power_series", "[]");
+  }
+
+
+  let chart = null;
+  let liveData = [];
+  let mode = "day";
+
+
+  function formatPower(value) {
+  if (typeof value !== "number" || isNaN(value)) {
+    return "--";
+  }
+
+  if (value < 1) {
+    return (value * 1000).toFixed(0) + " mW";
+  }
+  return value.toFixed(2) + " W";
+}
+
+
+  /* -------- INIT DAY CHART (NO TIME LABELS) -------- */
+  async function initDayChart() {
+    const r = await fetch("/api/power/day");
+    const data = await r.json();
+
+    liveData = storedSeries.length
+      ? storedSeries
+      : data.map(d => safe(d.power));
+
+
+    chart = new Chart($("chart").getContext("2d"), {
+      type: "line",
+      data: {
+        labels: new Array(liveData.length).fill(""),
+        datasets: [{
+        label: "Power (auto)",
+        data: liveData,
+        borderColor: "#2563eb",
+        borderWidth: 2,
+        tension: 0.35,
+        pointRadius: 0
+      }]
+    },
+    options: {
+  animation: false,
+  scales: {
+    y: {
+      ticks: {
+        callback: v => v < 1 ? (v * 1000) + " mW" : v + " W"
+      }
+    }
+  },
+  plugins: {
+    tooltip: {
+      callbacks: {
+        label: ctx => formatPower(ctx.parsed.y)
+      }
+      }
+    }
+    }
+
+  });
+
+  }
+
+  /* -------- STATE -------- */
+  async function fetchState() {
+    const r = await fetch("/api/state");
+    const d = await r.json();
+
+    $("power").innerText = formatPower(safe(d.power));
+
+    let voltage = safe(d.voltage);
+    $("voltage").innerText =
+      voltage < 1
+        ? (voltage * 1000).toFixed(2) + " mV"
+        : voltage.toFixed(2) + " V";
+
+    let current = safe(d.current);
+    $("current").innerText =
+      current < 1
+        ? (current * 1000).toFixed(2) + " mA"
+        : current.toFixed(2) + " A";
+
+    $("weather").innerText = d.weather_risk || "--";
+    $("clouds").innerText  = (d.cloud_coverage ?? "--") + "%";
+    $("ldr").innerText     = d.ldr_diff ?? "--";
+    $("daynight").innerText = d.is_night ? "🌙 Night" : "☀️ Day";
+
+    $("status").innerText   = d.status ?? "UNKNOWN";
+    $("decision").innerText = d.decision ?? "--";
+    $("reason").innerText   = d.decision_reason ?? "";
+
+    if (mode === "day" && chart) {
+      liveData.push(safe(d.power));
+      localStorage.setItem("power_series", JSON.stringify(liveData));
+
+      if (liveData.length > 120) liveData.shift();
+      chart.data.labels = new Array(liveData.length).fill("");
+      chart.update("none");
+    }
+  }
+
+  /* -------- ENERGY -------- */
+  async function fetchEnergy() {
+    const r = await fetch("/api/energy/summary");
+    const d = await r.json();
+    $("e_today").innerText = d.today ?? 0;
+    $("e_week").innerText  = d.week ?? 0;
+    $("e_month").innerText = d.month ?? 0;
+    $("e_life").innerText  = d.lifetime ?? 0;
+  }
+
+  /* -------- SYSTEM EVENTS (FIXED) -------- */
+  async function fetchEvents() {
+    const r = await fetch("/api/events");
+    const data = await r.json();
+    const el = $("events");
+
+    if (!Array.isArray(data) || data.length === 0) {
+      el.innerHTML = "<i>No events recorded yet</i>";
+      return;
+    }
+
+    el.innerHTML = "";
+    data.slice().reverse().forEach(e => {
+      let cls = "event-info";
+      if (e.level === "CRITICAL") cls = "event-critical";
+      else if (e.level === "WARNING") cls = "event-warning";
+      else if (e.level === "RECOVERY") cls = "event-recovery";
+
+      el.innerHTML += `
+        <div class="${cls}">
+          • <b>${e.timestamp}</b> — ${e.message}
+        </div>
+      `;
+    });
+  }
+
+  /* -------- CHART SWITCH -------- */
+  window.switchChart = async (m) => {
+    mode = m;
+    if (chart) chart.destroy();
+
+    if (m === "day") {
+      await initDayChart();
+      return;
+    }
+
+    const r = await fetch(`/api/energy/${m}`);
+    const data = await r.json();
+
+    chart = new Chart($("chart").getContext("2d"), {
+      type: "bar",
+      data: {
+        labels: data.map(d => d.period),
+        datasets: [{
+          label: "Energy (kWh)",
+          data: data.map(d => d.energy_kwh),
+          backgroundColor: "#16a34a"
+        }]
+      },
+      options: { animation: false }
+    });
+  };
+
+  /* -------- STARTUP -------- */
+  initDayChart();
+  fetchState();
+  fetchEnergy();
+  fetchEvents();
+
+  setInterval(fetchState, 2000);
+  setInterval(fetchEnergy, 10000);
+  setInterval(fetchEvents, 5000);
+});
+</script>
+
+</body>
+</html>
