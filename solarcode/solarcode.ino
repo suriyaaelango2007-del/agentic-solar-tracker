@@ -6,8 +6,8 @@
 #include <Adafruit_INA219.h>
 
 // ================= WIFI =================
-const char* ssid = "SolarAI";
-const char* password = "solar1234";
+const char* ssid = "YOUR_WIFI_SSID";
+const char* password = "YOUR_WIFI_PASSWORD";
 
 const char* sensorUrl   = "http://10.26.153.48:5000/api/sensor";
 const char* decisionUrl = "http://10.26.153.48:5000/api/state";
